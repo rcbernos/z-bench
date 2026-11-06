@@ -6,32 +6,28 @@
 # - Chunk sizes: 10MB, 25MB, 50MB, 100MB
 # - Memory limits: none, 500MB
 #
+# Prerequisites:
+#   1. AWS SSO logged in
+#   2. Set ZSTORE_ENV environment variable pointing to your zstore .env file
+#      Example: export ZSTORE_ENV=/path/to/your/zstore/.env
+#   3. Set ZSTORE_BIN environment variable pointing to your zstore binary
+#      Example: export ZSTORE_BIN=/path/to/your/zstore
+#   4. z-bench project directory with activated venv
+#
 # Usage:
-#   cd /home/bayani/Documents/Programming/z-bench
+#   export ZSTORE_ENV=/path/to/your/zstore/.env
+#   export ZSTORE_BIN=/path/to/your/zstore
+#   cd /path/to/z-bench
 #   source .venv/bin/activate
 #   ./scripts/128mb-all-configs.sh
 
 set -o pipefail
-
-# Configuration
-FILE_SIZE="128MB"
-NUM_FILES=10
-TOTAL_SIZE="1280MB"
-WAIT_SECONDS=10
-OUTPUT_DIR="./scripts/results"
-ZSTORE_BIN="/home/bayani/Documents/Programming/zstore/zstore"
-BUCKET="zs://my-zstore-bucket/"
-DOWNLOADS_DIR="./downloads/"
-TESTFILES_DIR="./testfiles"
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
-
-# Track failed configurations
-FAILED_CONFIGS=()
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -44,6 +40,41 @@ log_warn() {
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
+
+# ============================================
+# Environment Setup (from ZSTORE_ENV variable)
+# ============================================
+if [ -n "$ZSTORE_ENV" ] && [ -f "$ZSTORE_ENV" ]; then
+    log_info "Sourcing zstore environment from $ZSTORE_ENV"
+    source "$ZSTORE_ENV"
+else
+    echo "Error: ZSTORE_ENV not set or file not found."
+    echo "Please set: export ZSTORE_ENV=/path/to/your/zstore/.env"
+    echo "Example: source /path/to/your/zstore/.env && aws sso login"
+    exit 1
+fi
+
+# Verify AWS_REGION is set
+if [ -z "$AWS_REGION" ]; then
+    echo "Error: AWS_REGION not set. Please ensure it's in your zstore .env file"
+    exit 1
+fi
+
+# Configuration
+FILE_SIZE="128MB"
+NUM_FILES=10
+TOTAL_SIZE="1280MB"
+WAIT_SECONDS=10
+OUTPUT_DIR="./scripts/results"
+
+# ZSTORE_BIN can be overridden via environment variable
+ZSTORE_BIN="${ZSTORE_BIN:-/usr/local/bin/zstore}"
+BUCKET="zs://my-zstore-bucket/"
+DOWNLOADS_DIR="./downloads/"
+TESTFILES_DIR="./testfiles"
+
+# Track failed configurations
+FAILED_CONFIGS=()
 
 run_config() {
     local config_num=$1
