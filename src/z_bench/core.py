@@ -302,7 +302,7 @@ class BenchmarkRunner:
                                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                                     pass
                             # Convert to percentage (interval is 0.01s = 10ms)
-                            cpu_pct = min(cpu_delta / 0.01 * 100, 100.0)
+                            cpu_pct = cpu_delta / 0.01 * 100
                             peak_cpu = max(peak_cpu, cpu_pct)
                         except (psutil.NoSuchProcess, psutil.AccessDenied):
                             pass
