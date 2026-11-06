@@ -2,20 +2,19 @@
 
 import csv
 import json
-import os
 import random
 import shutil
-import statistics
 import subprocess
-import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Dict, List, Optional, Tuple
+
+import psutil
 
 
 class BenchmarkConfig:
     """Configuration container for benchmark parameters."""
-    
+
     def __init__(self) -> None:
         self.output_dir: Optional[Path] = None
         self.input_dir: Optional[Path] = None
@@ -26,7 +25,7 @@ class BenchmarkConfig:
         self.out_file: Optional[Path] = None
         self.no_log: bool = False
         self.reuse_files: bool = False
-        
+
         # Command templates
         self.put_cmd: Optional[str] = None
         self.get_cmd: Optional[str] = None
@@ -35,382 +34,522 @@ class BenchmarkConfig:
 
 class FileGenerator:
     """Handles generation of test files for benchmarking."""
-    
+
     def __init__(self, config: BenchmarkConfig) -> None:
         self.config = config
-    
+
     def parse_size(self, size_str: str) -> int:
         """Parse size string (e.g., '10MB', '1GB') to bytes."""
         size_str = size_str.upper().strip()
-        
+
         # Define units in order of length (longest first to avoid partial matches)
-        units = [('TB', 1024**4), ('GB', 1024**3), ('MB', 1024**2), ('KB', 1024), ('B', 1)]
-        
+        units = [
+            ("TB", 1024**4),
+            ("GB", 1024**3),
+            ("MB", 1024**2),
+            ("KB", 1024),
+            ("B", 1),
+        ]
+
         for unit, multiplier in units:
             if size_str.endswith(unit):
-                number_part = size_str[:-len(unit)].strip()
+                number_part = size_str[: -len(unit)].strip()
                 try:
                     return int(float(number_part) * multiplier)
                 except ValueError:
                     raise ValueError(f"Invalid size format: {size_str}")
-        
+
         # Try parsing as plain number (bytes)
         try:
             return int(size_str)
         except ValueError:
             raise ValueError(f"Invalid size format: {size_str}")
-    
+
     def validate_disk_space(self, required_bytes: int) -> bool:
         """Validate available disk space before generation."""
         if not self.config.output_dir:
             return False
-            
+
         # Get available disk space
         _, _, free_bytes = shutil.disk_usage(self.config.output_dir.parent)
-        
+
         if free_bytes < required_bytes:
-            print(f"Error: Insufficient disk space. Required: {required_bytes:,} bytes, Available: {free_bytes:,} bytes")
+            print(
+                f"Error: Insufficient disk space. Required: {required_bytes:,} bytes, Available: {free_bytes:,} bytes"
+            )
             return False
-        
+
         return True
-    
+
     def generate_files(self) -> List[Path]:
         """Generate reproducible random binary files."""
-        if not self.config.output_dir or not self.config.file_size or not self.config.total_size:
+        if (
+            not self.config.output_dir
+            or not self.config.file_size
+            or not self.config.total_size
+        ):
             raise ValueError("Missing required parameters for file generation")
-        
+
         # Parse sizes
         file_size_bytes = self.parse_size(self.config.file_size)
         total_size_bytes = self.parse_size(self.config.total_size)
-        
+
         # Calculate number of files
         num_files = total_size_bytes // file_size_bytes
         if num_files == 0:
-            raise ValueError(f"File size ({self.config.file_size}) is larger than total size ({self.config.total_size})")
-        
+            raise ValueError(
+                f"File size ({self.config.file_size}) is larger than total size ({self.config.total_size})"
+            )
+
         # Validate disk space
         if not self.validate_disk_space(total_size_bytes):
             raise RuntimeError("Insufficient disk space")
-        
+
         # Create output directory
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Generate files with fixed seed for reproducibility
         random.seed(42)
         generated_files = []
-        
+
         print(f"Generating {num_files} files of {file_size_bytes:,} bytes each...")
-        
+
         for i in range(num_files):
-            filename = f"file_{i+1:04d}.bin"
+            filename = f"file_{i + 1:04d}.bin"
             filepath = self.config.output_dir / filename
-            
+
             # Generate random binary data
-            with open(filepath, 'wb') as f:
+            with open(filepath, "wb") as f:
                 remaining = file_size_bytes
                 chunk_size = min(1024 * 1024, remaining)  # 1MB chunks
-                
+
                 while remaining > 0:
                     chunk_size = min(chunk_size, remaining)
                     data = random.randbytes(chunk_size)
                     f.write(data)
                     remaining -= chunk_size
-            
+
             generated_files.append(filepath)
-        
+
         # Log generation summary
         actual_total = sum(f.stat().st_size for f in generated_files)
-        print(f"Generated {len(generated_files)} files, total size: {actual_total:,} bytes")
-        
+        print(
+            f"Generated {len(generated_files)} files, total size: {actual_total:,} bytes"
+        )
+
         return generated_files
 
 
 class BenchmarkRunner:
     """Handles execution of benchmark operations."""
-    
+
     def __init__(self, config: BenchmarkConfig) -> None:
         self.config = config
         self.results: List[Dict] = []
-    
+
     def run_warmup(self, operation: str, files: List[Path]) -> None:
         """Run warm-up operations before measured benchmark."""
         if self.config.warmup <= 0:
             return
-            
+
         cmd_template = self._get_command_template(operation)
         if not cmd_template:
             raise ValueError(f"No command template provided for {operation} operation")
-        
-        warmup_files = files[:self.config.warmup]
+
+        warmup_files = files[: self.config.warmup]
         print(f"Running {len(warmup_files)} warmup operations...")
-        
+
         for i, filepath in enumerate(warmup_files, 1):
-            print(f"\rWarmup {i}/{len(warmup_files)}: {filepath.name}", end="", flush=True)
-            
-            cmd = cmd_template.replace('{file}', str(filepath))
-            cmd = cmd.replace('{filename}', filepath.name)
-            success, error, latency_ns = self.execute_command(cmd, filepath.name)
-            
+            print(
+                f"\rWarmup {i}/{len(warmup_files)}: {filepath.name}", end="", flush=True
+            )
+
+            cmd = cmd_template.replace("{file}", str(filepath))
+            cmd = cmd.replace("{filename}", filepath.name)
+            success, error, latency_ns, cpu_peak, mem_peak = self.execute_command(
+                cmd, filepath.name
+            )
+
             result = {
-                'timestamp_ns': time.perf_counter_ns(),
-                'operation': operation.upper(),
-                'filename': filepath.name,
-                'size_bytes': filepath.stat().st_size,
-                'latency_ns': latency_ns,
-                'status': 'success' if success else 'fail',
-                'error': error,
-                'warmup': True
+                "timestamp_ns": time.perf_counter_ns(),
+                "operation": operation.upper(),
+                "filename": filepath.name,
+                "size_bytes": filepath.stat().st_size,
+                "latency_ns": latency_ns,
+                "cpu_peak_percent": cpu_peak,
+                "memory_peak_rss_mb": mem_peak,
+                "status": "success" if success else "fail",
+                "error": error,
+                "warmup": True,
             }
-            
+
             self.log_result(result)
-            
+
             # Raise warning on failure but continue
             if not success:
-                print(f"\n[WARNING] Warmup operation failed for {filepath.name}: {error}")
-        
+                print(
+                    f"\n[WARNING] Warmup operation failed for {filepath.name}: {error}"
+                )
+
         print()  # New line after progress
-    
-    def run_operation(self, operation: str, files: List[Path], is_warmup: bool = False) -> None:
+
+    def run_operation(
+        self, operation: str, files: List[Path], is_warmup: bool = False
+    ) -> None:
         """Run benchmark operations and collect timing data."""
         cmd_template = self._get_command_template(operation)
         if not cmd_template:
             raise ValueError(f"No command template provided for {operation} operation")
-        
+
         print(f"Running {operation.upper()} benchmark on {len(files)} files...")
-        
+
         for i, filepath in enumerate(files, 1):
             # Simple progress indicator
             percent = (i * 100) // len(files)
             bar_length = 30
             filled_length = (percent * bar_length) // 100
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-            
-            print(f"\r[{bar}] {percent:3d}% ({i}/{len(files)}) {filepath.name}", end="", flush=True)
-            
-            cmd = cmd_template.replace('{file}', str(filepath))
-            cmd = cmd.replace('{filename}', filepath.name)
-            success, error, latency_ns = self.execute_command(cmd, filepath.name)
-            
+            bar = "█" * filled_length + "░" * (bar_length - filled_length)
+
+            print(
+                f"\r[{bar}] {percent:3d}% ({i}/{len(files)}) {filepath.name}",
+                end="",
+                flush=True,
+            )
+
+            cmd = cmd_template.replace("{file}", str(filepath))
+            cmd = cmd.replace("{filename}", filepath.name)
+            success, error, latency_ns, cpu_peak, mem_peak = self.execute_command(
+                cmd, filepath.name
+            )
+
             result = {
-                'timestamp_ns': time.perf_counter_ns(),
-                'operation': operation.upper(),
-                'filename': filepath.name,
-                'size_bytes': filepath.stat().st_size,
-                'latency_ns': latency_ns,
-                'status': 'success' if success else 'fail',
-                'error': error,
-                'warmup': is_warmup
+                "timestamp_ns": time.perf_counter_ns(),
+                "operation": operation.upper(),
+                "filename": filepath.name,
+                "size_bytes": filepath.stat().st_size,
+                "latency_ns": latency_ns,
+                "cpu_peak_percent": cpu_peak,
+                "memory_peak_rss_mb": mem_peak,
+                "status": "success" if success else "fail",
+                "error": error,
+                "warmup": is_warmup,
             }
-            
+
             self.log_result(result)
-            
+
             # Raise warning on failure but continue
             if not success:
                 print(f"\n[WARNING] Operation failed for {filepath.name}: {error}")
-        
+
         print()  # New line after progress
-    
-    def execute_command(self, cmd: str, filename: str) -> Tuple[bool, str, int]:
-        """Execute a single command and measure timing."""
+
+    def execute_command(
+        self, cmd: str, filename: str
+    ) -> Tuple[bool, str, int, float, float]:
+        """Execute a single command and measure timing, CPU and memory."""
         start_time = time.perf_counter_ns()
-        
+
+        # Initialize tracking variables
+        peak_cpu = 0.0
+        peak_memory = 0.0
+
         try:
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, check=True
+            # Start the subprocess
+            proc = subprocess.Popen(
+                cmd,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
+
+            # Get current process for monitoring
+            try:
+                process = psutil.Process(proc.pid)
+            except psutil.NoSuchProcess:
+                process = None
+
+            # Monitor until process completes
+            while proc.poll() is None:
+                try:
+                    if process:
+                        # Get CPU times before measurement
+                        cpu_before = process.cpu_times()
+                        # Also get children's CPU times
+                        children = process.children(recursive=True)
+                        cpu_before_children = {}
+                        for child in children:
+                            try:
+                                cpu_before_children[child.pid] = child.cpu_times()
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                        time.sleep(0.01)
+                        # Get CPU times after measurement
+                        try:
+                            cpu_after = process.cpu_times()
+                            cpu_delta = (cpu_after.user - cpu_before.user) + (
+                                cpu_after.system - cpu_before.system
+                            )
+                            # Add children's CPU time
+                            for child in children:
+                                try:
+                                    child_after = child.cpu_times()
+                                    if child.pid in cpu_before_children:
+                                        cpu_before_c = cpu_before_children[child.pid]
+                                        cpu_delta += (
+                                            child_after.user - cpu_before_c.user
+                                        ) + (child_after.system - cpu_before_c.system)
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                            # Convert to percentage (interval is 0.01s = 10ms)
+                            cpu_pct = min(cpu_delta / 0.01 * 100, 100.0)
+                            peak_cpu = max(peak_cpu, cpu_pct)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+
+                        # Get memory RSS
+                        try:
+                            mem_info = process.memory_info()
+                            peak_memory = max(
+                                peak_memory, mem_info.rss / (1024 * 1024)
+                            )  # MB
+                            # Add children's memory
+                            for child in children:
+                                try:
+                                    peak_memory = max(
+                                        peak_memory,
+                                        child.memory_info().rss / (1024 * 1024),
+                                    )
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            pass
+                    else:
+                        time.sleep(0.01)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    break
+
             end_time = time.perf_counter_ns()
-            return True, "", end_time - start_time
-        except subprocess.CalledProcessError as e:
+
+            # Check final result (includes possible CalledProcessError)
+            _, stderr = proc.communicate()
+            if proc.returncode != 0:
+                error_msg = (
+                    stderr.strip() if stderr else f"Exit code: {proc.returncode}"
+                )
+                return False, error_msg, end_time - start_time, peak_cpu, peak_memory
+
+            return True, "", end_time - start_time, peak_cpu, peak_memory
+
+        except Exception as e:
             end_time = time.perf_counter_ns()
-            error_msg = e.stderr.strip() if e.stderr else str(e)
-            return False, error_msg, end_time - start_time
-    
+            error_msg = str(e)
+            return False, error_msg, end_time - start_time, peak_cpu, peak_memory
+
     def log_result(self, result: Dict) -> None:
         """Log a single benchmark result."""
         self.results.append(result)
-    
+
     def _get_command_template(self, operation: str) -> Optional[str]:
         """Get command template for operation."""
-        if operation == 'put':
+        if operation == "put":
             return self.config.put_cmd
-        elif operation == 'get':
+        elif operation == "get":
             return self.config.get_cmd
-        elif operation == 'delete':
+        elif operation == "delete":
             return self.config.del_cmd
         return None
 
 
 class OutputWriter:
     """Handles writing benchmark results to files."""
-    
+
     def __init__(self, output_path: Path, no_log: bool = False) -> None:
         self.output_path = output_path
         self.no_log = no_log
         self.buffer: List[Dict] = []
-    
+
     def write_result(self, result: Dict) -> None:
         """Write a single result to output."""
         if self.no_log:
             return
-            
+
         self.buffer.append(result)
-        
+
         # Flush buffer when it gets large
         if len(self.buffer) >= 100:
             self.flush()
-    
+
     def flush(self) -> None:
         """Flush buffered results to file."""
         if self.no_log or not self.buffer:
             return
-            
-        if self.output_path.suffix.lower() == '.csv':
+
+        if self.output_path.suffix.lower() == ".csv":
             self._write_csv()
         else:
             self._write_jsonl()
-        
+
         self.buffer.clear()
-    
+
     def _write_csv(self) -> None:
         """Write results to CSV file."""
         file_exists = self.output_path.exists()
-        
-        with open(self.output_path, 'a', newline='') as f:
+
+        with open(self.output_path, "a", newline="") as f:
             if not self.buffer:
                 return
-                
-            fieldnames = ['timestamp_ns', 'operation', 'filename', 'size_bytes', 
-                         'latency_ns', 'status', 'error', 'warmup']
+
+            fieldnames = [
+                "timestamp_ns",
+                "operation",
+                "filename",
+                "size_bytes",
+                "latency_ns",
+                "cpu_peak_percent",
+                "memory_peak_rss_mb",
+                "status",
+                "error",
+                "warmup",
+            ]
             writer = csv.DictWriter(f, fieldnames=fieldnames)
-            
+
             if not file_exists:
                 writer.writeheader()
-            
+
             writer.writerows(self.buffer)
-    
+
     def _write_jsonl(self) -> None:
         """Write results to JSON Lines file."""
-        with open(self.output_path, 'a') as f:
+        with open(self.output_path, "a") as f:
             for result in self.buffer:
                 json.dump(result, f)
-                f.write('\n')
+                f.write("\n")
 
 
 class ZBenchmarker:
     """Main benchmarker orchestrator."""
-    
+
     def __init__(self, config: BenchmarkConfig) -> None:
         self.config = config
         self.file_generator = FileGenerator(config)
         self.benchmark_runner = BenchmarkRunner(config)
         self.output_writer: Optional[OutputWriter] = None
-        
+
         if config.out_file:
             self.output_writer = OutputWriter(config.out_file, config.no_log)
-    
+
     def run_generate(self) -> List[Path]:
         """Run file generation mode."""
         return self.file_generator.generate_files()
-    
+
     def run_benchmark(self, operation: str) -> None:
         """Run single operation benchmark mode."""
         if not self.config.input_dir or not self.config.input_dir.exists():
             raise ValueError("Input directory does not exist")
-        
+
         # Get list of files to benchmark
-        files = list(self.config.input_dir.glob('*.bin'))
+        files = list(self.config.input_dir.glob("*.bin"))
         if not files:
             raise ValueError("No .bin files found in input directory")
-        
+
         files.sort()  # Ensure consistent order
-        
+
         print(f"Running {operation} benchmark on {len(files)} files...")
-        
+
         # Run warmup phase
         self.benchmark_runner.run_warmup(operation, files)
-        
+
         # Run main benchmark
         self.benchmark_runner.run_operation(operation, files)
-        
+
         # Write results
         if self.output_writer:
             for result in self.benchmark_runner.results:
                 self.output_writer.write_result(result)
             self.output_writer.flush()
-        
+
         print(f"Completed {operation} benchmark")
-    
+
     def run_full_cycle(self) -> None:
         """Run complete benchmark cycle (--ALL mode)."""
         print("Running full benchmark cycle")
-        
+
         # Determine which files to use
         if self.config.input_dir and self.config.input_dir.exists():
             # Use existing files
-            files = list(self.config.input_dir.glob('*.bin'))
+            files = list(self.config.input_dir.glob("*.bin"))
             if not files:
                 raise ValueError(f"No .bin files found in {self.config.input_dir}")
             files.sort()
             print(f"Using {len(files)} existing files from {self.config.input_dir}")
         else:
             # Generate new files
-            if not self.config.output_dir or not self.config.file_size or not self.config.total_size:
-                raise ValueError("Must provide --output-dir, --file-size, and --total-size for file generation, or --input-dir for existing files")
-            
+            if (
+                not self.config.output_dir
+                or not self.config.file_size
+                or not self.config.total_size
+            ):
+                raise ValueError(
+                    "Must provide --output-dir, --file-size, and --total-size for file generation, or --input-dir for existing files"
+                )
+
             if self.config.reuse_files and self.config.output_dir.exists():
-                existing_files = list(self.config.output_dir.glob('*.bin'))
+                existing_files = list(self.config.output_dir.glob("*.bin"))
                 if existing_files:
                     files = sorted(existing_files)
-                    print(f"Reusing {len(files)} existing files from {self.config.output_dir}")
+                    print(
+                        f"Reusing {len(files)} existing files from {self.config.output_dir}"
+                    )
                 else:
                     files = self.file_generator.generate_files()
             else:
                 files = self.file_generator.generate_files()
-        
+
         # TODO: Implement full benchmark sequence
         # 1. PUT warm-up and benchmark
         # 2. Wait
-        # 3. GET warm-up and benchmark  
+        # 3. GET warm-up and benchmark
         # 4. Wait
         # 5. DELETE warm-up and benchmark
-        
+
         # Validate that all required commands are provided
         if not all([self.config.put_cmd, self.config.get_cmd, self.config.del_cmd]):
             raise ValueError("--ALL mode requires --put-cmd, --get-cmd, and --del-cmd")
-        
+
         # Run PUT benchmark
         print("\n=== PUT Phase ===")
-        self.benchmark_runner.run_warmup('put', files)
-        self.benchmark_runner.run_operation('put', files)
-        
+        self.benchmark_runner.run_warmup("put", files)
+        self.benchmark_runner.run_operation("put", files)
+
         # Wait between phases
         if self.config.wait > 0:
             print(f"\nWaiting {self.config.wait} seconds...")
             time.sleep(self.config.wait)
-        
+
         # Run GET benchmark
         print("\n=== GET Phase ===")
-        self.benchmark_runner.run_warmup('get', files)
-        self.benchmark_runner.run_operation('get', files)
-        
+        self.benchmark_runner.run_warmup("get", files)
+        self.benchmark_runner.run_operation("get", files)
+
         # Wait between phases
         if self.config.wait > 0:
             print(f"\nWaiting {self.config.wait} seconds...")
             time.sleep(self.config.wait)
-        
+
         # Run DELETE benchmark
         print("\n=== DELETE Phase ===")
-        self.benchmark_runner.run_warmup('delete', files)
-        self.benchmark_runner.run_operation('delete', files)
-        
+        self.benchmark_runner.run_warmup("delete", files)
+        self.benchmark_runner.run_operation("delete", files)
+
         # Write all results
         if self.output_writer:
             for result in self.benchmark_runner.results:
                 self.output_writer.write_result(result)
             self.output_writer.flush()
-        
+
         print(f"\nCompleted full benchmark cycle with {len(files)} files")
-    
+
     def validate_commands(self) -> None:
         """Validate that required commands are provided for --ALL mode."""
         # TODO: Implement command validation
