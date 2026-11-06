@@ -212,3 +212,18 @@ z-bench benchmark --op put \
   --put-cmd "mc cp {file} local/testbucket/" \
   --out minio-put.jsonl
 ```
+
+### zStore Full Benchmark (Generate Files)
+
+```bash
+z-bench --ALL \
+  --output-dir ./testfiles \
+  --file-size 50MB \
+  --total-size 2GB \
+  --put-cmd "/path/to/zstore upload {file} zs://my-zstore-bucket/" \
+  --get-cmd "/path/to/zstore download zs://my-zstore-bucket/{filename} ./downloads/" \
+  --del-cmd "/path/to/zstore delete zs://my-zstore-bucket/{filename}" \
+  --out zstore-benchmark.csv \
+  --warmup 5 \
+  --wait 10
+```
