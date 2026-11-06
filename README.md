@@ -5,7 +5,7 @@ A professional benchmarking tool for object storage systems that provides accura
 ## Requirements
 
 - Python >= 3.9
-- Standard libraries only (no external dependencies)
+- External dependencies: `psutil` (for CPU/memory resource monitoring)
 
 ## Installation
 
@@ -155,6 +155,8 @@ Results are logged per-operation with the following fields:
 | `filename` | Name of the test file (e.g., file_0001.bin) |
 | `size_bytes` | File size in bytes |
 | `latency_ns` | **Total completion time** of the command execution in nanoseconds |
+| `cpu_peak_percent` | **Peak CPU utilization** during operation (%) |
+| `memory_peak_rss_mb` | **Peak RSS memory** during operation (MB) |
 | `status` | Operation result: success or fail |
 | `error` | Error message from stderr if operation failed (empty if successful) |
 | `warmup` | Whether this was a warmup operation: true or false |
@@ -164,6 +166,8 @@ Results are logged per-operation with the following fields:
 - **`latency_ns`**: Measures the complete execution time of the storage command from start to finish, including network transfer, authentication, and storage system processing
 - **`timestamp_ns`**: Uses `time.perf_counter_ns()` for high-precision, monotonic timing that's not affected by system clock adjustments
 - **`size_bytes`**: Actual file size on disk, useful for calculating throughput (bytes/second)
+- **`cpu_peak_percent`**: Maximum CPU utilization measured at 10ms intervals during the operation using `psutil`
+- **`memory_peak_rss_mb`**: Maximum Resident Set Size (physical memory in MB) during the operation
 - **`warmup`**: Warmup operations help "prime" the system and are excluded from performance analysis
 
 ## Performance Features
@@ -173,6 +177,8 @@ Results are logged per-operation with the following fields:
 - Buffered logging to reduce I/O impact
 - No progress bars or summaries during execution
 - Sequential execution for consistent results
+- Real-time CPU and memory resource monitoring using `psutil`
+- Peak CPU (%) and memory (RSS) tracking during operations
 
 ## Examples
 
