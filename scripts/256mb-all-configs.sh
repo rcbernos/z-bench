@@ -119,7 +119,7 @@ run_config() {
 
 # Main execution
 main() {
-    log_info "Starting 128MB All Configurations Benchmark"
+    log_info "Starting 256MB All Configurations Benchmark"
     log_info "Files: $NUM_FILES × $FILE_SIZE = $TOTAL_SIZE"
     log_info "Total configurations: 18"
 
