@@ -73,6 +73,16 @@ BUCKET="zs://my-zstore-bucket/"
 DOWNLOADS_DIR="./downloads/"
 TESTFILES_DIR="./testfiles"
 
+# Resolve full path to z-bench (works with sudo)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ZBENCH_PATH="$SCRIPT_DIR/../.venv/bin/z-bench"
+
+if [ ! -x "$ZBENCH_PATH" ]; then
+    echo "Error: z-bench not found at $ZBENCH_PATH"
+    echo "Please run from z-bench project directory"
+    exit 1
+fi
+
 # Track failed configurations
 FAILED_CONFIGS=()
 
@@ -88,8 +98,7 @@ run_config() {
 
     log_info "Starting Config $config_num: chunking=$chunking, chunk_size=${chunk_size:-default}, memory=${mem_limit:-none}"
 
-    # Build z-bench command
-    local cmd="z-bench --ALL \
+    local cmd="$ZBENCH_PATH --ALL \
   --input-dir $TESTFILES_DIR \
   --put-cmd \"$put_cmd\" \
   --get-cmd \"$get_cmd\" \
@@ -117,7 +126,7 @@ main() {
     # Step 1: Generate test files if they don't exist
     if [ ! -d "$TESTFILES_DIR" ] || [ -z "$(ls -A $TESTFILES_DIR/*.bin 2>/dev/null)" ]; then
         log_info "Generating test files..."
-        z-bench generate --output-dir "$TESTFILES_DIR" --file-size "$FILE_SIZE" --total-size "$TOTAL_SIZE"
+        "$ZBENCH_PATH" generate --output-dir "$TESTFILES_DIR" --file-size "$FILE_SIZE" --total-size "$TOTAL_SIZE"
         if [ $? -ne 0 ]; then
             log_error "Failed to generate test files"
             exit 1
