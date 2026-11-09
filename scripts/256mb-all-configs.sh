@@ -71,7 +71,7 @@ OUTPUT_DIR="./scripts/results"
 ZSTORE_BIN="${ZSTORE_BIN:-/usr/local/bin/zstore}"
 BUCKET="zs://my-zstore-bucket/"
 DOWNLOADS_DIR="./downloads/"
-TESTFILES_DIR="./testfiles"
+TESTFILES_DIR="./testfiles/${FILE_SIZE}"
 
 # Resolve full path to z-bench (works with sudo)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
