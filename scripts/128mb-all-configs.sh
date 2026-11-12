@@ -23,6 +23,11 @@
 
 set -o pipefail
 
+# Source environment configuration if available
+if [ -f "$(dirname "$0")/.env" ]; then
+    source "$(dirname "$0")/.env"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -69,8 +74,11 @@ OUTPUT_DIR="./scripts/results"
 
 # ZSTORE_BIN can be overridden via environment variable
 ZSTORE_BIN="${ZSTORE_BIN:-/usr/local/bin/zstore}"
-BUCKET="zs://my-zstore-bucket/"
-DOWNLOADS_DIR="./downloads/"
+
+# BUCKET can be overridden via TEST_BUCKET from .env
+BUCKET="${TEST_BUCKET:-zs://bayani-zstore-aws-bucket/}"
+
+DOWNLOADS_DIR="${DOWNLOADS_DIR:-./downloads/}"
 TESTFILES_DIR="./testfiles/${FILE_SIZE}"
 
 # Resolve full path to z-bench (works with sudo)
