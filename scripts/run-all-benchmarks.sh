@@ -47,6 +47,10 @@ declare -a SUCCESSFUL_SCRIPTS=()
 declare -a FAILED_SCRIPTS=()
 OVERALL_START_TIME=0
 
+# Global path variables (portable resolution)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OUTPUT_DIR="$SCRIPT_DIR/results"
+
 # Logging functions
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -70,11 +74,11 @@ validate_environment() {
 
     # Auto-source scripts/.env if ZSTORE_ENV is not already set
     if [ -z "$ZSTORE_ENV" ] || [ -z "$ZSTORE_BIN" ]; then
-        if [ -f "./scripts/.env" ]; then
+        if [ -f "$SCRIPT_DIR/.env" ]; then
             log_info "Sourcing scripts/.env to get environment variables..."
-            source ./scripts/.env
+            source "$SCRIPT_DIR/.env"
         else
-            log_warn "scripts/.env not found at ./scripts/.env"
+            log_warn "scripts/.env not found at $SCRIPT_DIR/.env"
         fi
     fi
 
@@ -98,7 +102,6 @@ validate_environment() {
     log_info "AWS_REGION: $AWS_REGION"
 
     # Check ZBENCH_PATH
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     ZBENCH_PATH="$SCRIPT_DIR/../.venv/bin/z-bench"
     
     if [ ! -x "$ZBENCH_PATH" ]; then
