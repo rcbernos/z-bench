@@ -209,7 +209,13 @@ main() {
     echo ""
 
     # Ensure we're in the z-bench directory
-    cd /home/bayani/Documents/Programming/z-bench
+    cd "$SCRIPT_DIR/.." || {
+        log_error "Failed to change to project root. Script_DIR: $SCRIPT_DIR"
+        exit 1
+    }
+
+    # Ensure results directory exists
+    mkdir -p "$SCRIPT_DIR/results"
 
     # Activate venv if not already active
     if [ -z "$VIRTUAL_ENV" ]; then

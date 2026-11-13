@@ -73,7 +73,6 @@ fi
 FILE_SIZE="256MB"
 NUM_FILES=1
 TOTAL_SIZE="256MB"
-OUTPUT_DIR="./scripts/results"
 
 # ZSTORE_BIN can be overridden via environment variable
 ZSTORE_BIN="${ZSTORE_BIN:-/usr/local/bin/zstore}"
@@ -81,12 +80,16 @@ ZSTORE_BIN="${ZSTORE_BIN:-/usr/local/bin/zstore}"
 # BUCKET can be overridden via TEST_BUCKET from .env
 BUCKET="${TEST_BUCKET:-zs://bayani-zstore-aws-bucket/}"
 
-DOWNLOADS_DIR="${DOWNLOADS_DIR:-./downloads/}"
-TESTFILES_DIR="./testfiles/${FILE_SIZE}"
-
 # Resolve full path to z-bench (works with sudo)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ZBENCH_PATH="$SCRIPT_DIR/../.venv/bin/z-bench"
+
+# Output directory for results (portable path)
+OUTPUT_DIR="$SCRIPT_DIR/results"
+
+# Download and test files directories (portable paths)
+DOWNLOADS_DIR="${DOWNLOADS_DIR:-$SCRIPT_DIR/../downloads/}"
+TESTFILES_DIR="$SCRIPT_DIR/../testfiles/${FILE_SIZE}"
 
 if [ ! -x "$ZBENCH_PATH" ]; then
     echo "Error: z-bench not found at $ZBENCH_PATH"
@@ -156,6 +159,9 @@ run_config() {
 
 # Main execution
 main() {
+    # Store starting directory (where script was invoked from)
+    START_DIR=$(pwd)
+    
     log_info "Starting 256MB All Configurations Benchmark"
     log_info "File: 1 × $FILE_SIZE = $TOTAL_SIZE"
     log_info "Total: 18 configurations × 10 iterations = 180 iterations"
@@ -176,9 +182,14 @@ main() {
     # Ensure download directory exists
     mkdir -p "$DOWNLOADS_DIR"
 
-    # Store current directory
-    local script_dir=$(pwd)
-    cd /home/bayani/Documents/Programming/z-bench
+    # Ensure results directory exists
+    mkdir -p "$OUTPUT_DIR"
+
+    # Ensure we're in the z-bench project root for venv activation
+    cd "$SCRIPT_DIR/.." || {
+        log_error "Failed to change to project root. Script_DIR: $SCRIPT_DIR"
+        exit 1
+    }
 
     # Activate venv if not already active
     if [ -z "$VIRTUAL_ENV" ]; then
@@ -351,7 +362,7 @@ main() {
         "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # Summary
-    cd "$script_dir"
+    cd "$START_DIR"
     log_info "========================================="
     log_info "Benchmark Run Complete"
     log_info "Results directory: $OUTPUT_DIR"
