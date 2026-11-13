@@ -28,6 +28,10 @@ if [ -f "$(dirname "$0")/.env" ]; then
     source "$(dirname "$0")/.env"
 fi
 
+# Allow values from .env to override defaults
+WAIT_SECONDS="${WAIT_SECONDS:-10}"
+WARMUP="${WARMUP:-0}"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -69,7 +73,6 @@ fi
 FILE_SIZE="256MB"
 NUM_FILES=10
 TOTAL_SIZE="2560MB"
-WAIT_SECONDS=10
 OUTPUT_DIR="./scripts/results"
 
 # ZSTORE_BIN can be overridden via environment variable
@@ -94,6 +97,27 @@ fi
 # Track failed configurations
 FAILED_CONFIGS=()
 
+# =====================================================
+# Systemd Mode Detection (avoids auth prompts on EC2)
+# =====================================================
+detect_systemd_mode() {
+    # Ensure XDG_RUNTIME_DIR is set for user systemd (EC2 compatibility)
+    if [ -z "$XDG_RUNTIME_DIR" ]; then
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+    fi
+    
+    # Test if user systemd works (avoids auth prompts)
+    if command -v systemctl >/dev/null 2>&1 && systemctl --user status >/dev/null 2>&1 && systemd-run --user --scope true >/dev/null 2>&1; then
+        log_info "Using systemd-run --user mode (no auth required)"
+        MEM_LIMIT_CMD_PREFIX="systemd-run --user --scope -p MemoryLimit=500M"
+        SYSTEMD_USER_AVAILABLE=true
+    else
+        log_warn "Using system systemd-run mode (may require auth)"
+        MEM_LIMIT_CMD_PREFIX="systemd-run --scope -p MemoryLimit=500M"
+        SYSTEMD_USER_AVAILABLE=false
+    fi
+}
+
 run_config() {
     local config_num=$1
     local chunking=$2
@@ -112,7 +136,7 @@ run_config() {
   --get-cmd \"$get_cmd\" \
   --del-cmd \"$del_cmd\" \
   --out $out_file \
-  --warmup 0 \
+  --warmup ${WARMUP:-0} \
   --wait $WAIT_SECONDS"
 
     log_info "Running: $cmd"
@@ -156,6 +180,9 @@ main() {
         source .venv/bin/activate
     fi
 
+    # Detect systemd mode before running configs
+    detect_systemd_mode
+
     # ============================================
     # Config 1: none, default, no memory limit
     # ============================================
@@ -170,9 +197,9 @@ main() {
     # ============================================
     run_config 2 "none" "default" "500MB" \
         "$OUTPUT_DIR/config-02-none-256mb-500mb.csv" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN upload {file} $BUCKET" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN delete $BUCKET{filename}"
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
     # Config 3: fixed, 10MB, no limit
@@ -188,9 +215,9 @@ main() {
     # ============================================
     run_config 4 "fixed" "10MB" "500MB" \
         "$OUTPUT_DIR/config-04-fixed-10mb-256mb-500mb.csv" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=10MB" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN delete $BUCKET{filename}"
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=10MB" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
     # Config 5: fixed, 25MB, no limit
@@ -206,9 +233,9 @@ main() {
     # ============================================
     run_config 6 "fixed" "25MB" "500MB" \
         "$OUTPUT_DIR/config-06-fixed-25mb-256mb-500mb.csv" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=25MB" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN delete $BUCKET{filename}"
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=25MB" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
     # Config 7: fixed, 50MB, no limit
@@ -224,9 +251,9 @@ main() {
     # ============================================
     run_config 8 "fixed" "50MB" "500MB" \
         "$OUTPUT_DIR/config-08-fixed-50mb-256mb-500mb.csv" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=50MB" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN delete $BUCKET{filename}"
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=50MB" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
     # Config 9: fixed, 100MB, no limit
@@ -242,9 +269,9 @@ main() {
     # ============================================
     run_config 10 "fixed" "100MB" "500MB" \
         "$OUTPUT_DIR/config-10-fixed-100mb-256mb-500mb.csv" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=100MB" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN delete $BUCKET{filename}"
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=100MB" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
     # Config 11: equal-split, 10MB, no limit
@@ -260,9 +287,9 @@ main() {
     # ============================================
     run_config 12 "equal-split" "10MB" "500MB" \
         "$OUTPUT_DIR/config-12-equal-split-10mb-256mb-500mb.csv" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=10MB" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN delete $BUCKET{filename}"
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=10MB" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
     # Config 13: equal-split, 25MB, no limit
@@ -278,9 +305,9 @@ main() {
     # ============================================
     run_config 14 "equal-split" "25MB" "500MB" \
         "$OUTPUT_DIR/config-14-equal-split-25mb-256mb-500mb.csv" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=25MB" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN delete $BUCKET{filename}"
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=25MB" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
     # Config 15: equal-split, 50MB, no limit
@@ -296,9 +323,9 @@ main() {
     # ============================================
     run_config 16 "equal-split" "50MB" "500MB" \
         "$OUTPUT_DIR/config-16-equal-split-50mb-256mb-500mb.csv" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=50MB" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN delete $BUCKET{filename}"
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=50MB" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
     # Config 17: equal-split, 100MB, no limit
@@ -314,9 +341,9 @@ main() {
     # ============================================
     run_config 18 "equal-split" "100MB" "500MB" \
         "$OUTPUT_DIR/config-18-equal-split-100mb-256mb-500mb.csv" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=100MB" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "systemd-run --scope -p MemoryLimit=500M $ZSTORE_BIN delete $BUCKET{filename}"
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=100MB" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
+        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # Summary
     cd "$script_dir"
