@@ -71,8 +71,8 @@ fi
 
 # Configuration
 FILE_SIZE="10GB"
-NUM_FILES=10
-TOTAL_SIZE="100GB"
+NUM_FILES=1
+TOTAL_SIZE="10GB"
 OUTPUT_DIR="./scripts/results"
 
 # ZSTORE_BIN can be overridden via environment variable
@@ -130,7 +130,11 @@ run_config() {
 
     log_info "Starting Config $config_num: chunking=$chunking, chunk_size=${chunk_size:-default}, memory=${mem_limit:-none}"
 
-    local cmd="$ZBENCH_PATH --ALL \
+    # Run 10 iterations
+    for iteration in $(seq 1 10); do
+        log_info "  Iteration $iteration/10"
+
+        local cmd="$ZBENCH_PATH --ALL \
   --input-dir $TESTFILES_DIR \
   --put-cmd \"$put_cmd\" \
   --get-cmd \"$get_cmd\" \
@@ -139,21 +143,22 @@ run_config() {
   --warmup ${WARMUP:-0} \
   --wait $WAIT_SECONDS"
 
-    log_info "Running: $cmd"
+        log_info "  Running: $cmd"
 
-    if eval "$cmd" > "$OUTPUT_DIR/config-${config_num}-log.txt" 2>&1; then
-        log_info "Config $config_num completed successfully"
-    else
-        log_error "Config $config_num failed. See $OUTPUT_DIR/config-${config_num}-log.txt"
-        FAILED_CONFIGS+=($config_num)
-    fi
+        if eval "$cmd" > "$OUTPUT_DIR/config-${config_num}-iter-${iteration}-log.txt" 2>&1; then
+            log_info "  Iteration $iteration completed successfully"
+        else
+            log_error "  Iteration $iteration failed. See $OUTPUT_DIR/config-${config_num}-iter-${iteration}-log.txt"
+            FAILED_CONFIGS+=("$config_num-iteration-$iteration")
+        fi
+    done
 }
 
 # Main execution
 main() {
     log_info "Starting 10GB All Configurations Benchmark"
-    log_info "Files: $NUM_FILES × $FILE_SIZE = $TOTAL_SIZE"
-    log_info "Total configurations: 18"
+    log_info "File: 1 × $FILE_SIZE = $TOTAL_SIZE"
+    log_info "Total: 18 configurations × 10 iterations = 180 iterations"
 
     # Step 1: Generate test files if they don't exist
     if [ ! -d "$TESTFILES_DIR" ] || [ -z "$(ls -A $TESTFILES_DIR/*.bin 2>/dev/null)" ]; then
