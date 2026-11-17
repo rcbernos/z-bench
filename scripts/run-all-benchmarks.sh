@@ -39,7 +39,7 @@ SCRIPTS=(
     "256mb-all-configs.sh"
     "512mb-all-configs.sh"
     "1024mb-all-configs.sh"
-    "10GB-all-configs.sh"
+    # "10GB-all-configs.sh"
 )
 
 # Track overall results
