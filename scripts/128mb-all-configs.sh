@@ -1,10 +1,9 @@
 #!/bin/bash
 # 128mb-all-configs.sh - Test all chunk configurations on 128 MB files
 #
-# This script runs 18 benchmark configurations testing:
+# This script runs 9 benchmark configurations testing:
 # - Chunking methods: none, fixed, equal-split
 # - Chunk sizes: 10MB, 25MB, 50MB, 100MB
-# - Memory limits: none, 500MB
 #
 # Prerequisites:
 #   1. AWS SSO logged in
@@ -97,30 +96,6 @@ if [ ! -x "$ZBENCH_PATH" ]; then
     exit 1
 fi
 
-# Track failed configurations
-FAILED_CONFIGS=()
-
-# =====================================================
-# Systemd Mode Detection (avoids auth prompts on EC2)
-# =====================================================
-detect_systemd_mode() {
-    # Ensure XDG_RUNTIME_DIR is set for user systemd (EC2 compatibility)
-    if [ -z "$XDG_RUNTIME_DIR" ]; then
-        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-    fi
-    
-    # Test if user systemd works (avoids auth prompts)
-    if command -v systemctl >/dev/null 2>&1 && systemctl --user status >/dev/null 2>&1 && systemd-run --user --scope true >/dev/null 2>&1; then
-        log_info "Using systemd-run --user mode (no auth required)"
-        MEM_LIMIT_CMD_PREFIX="systemd-run --user --scope -p MemoryLimit=500M"
-        SYSTEMD_USER_AVAILABLE=true
-    else
-        log_warn "Using system systemd-run mode (may require auth)"
-        MEM_LIMIT_CMD_PREFIX="systemd-run --scope -p MemoryLimit=500M"
-        SYSTEMD_USER_AVAILABLE=false
-    fi
-}
-
 run_config() {
     local config_num=$1
     local chunking=$2
@@ -152,7 +127,6 @@ run_config() {
             log_info "  Iteration $iteration completed successfully"
         else
             log_error "  Iteration $iteration failed. See $OUTPUT_DIR/config-${config_num}-iter-${iteration}-log.txt"
-            FAILED_CONFIGS+=("$config_num-iteration-$iteration")
         fi
     done
 }
@@ -164,7 +138,7 @@ main() {
     
     log_info "Starting 128MB All Configurations Benchmark"
     log_info "File: 1 × $FILE_SIZE = $TOTAL_SIZE"
-    log_info "Total: 18 configurations × 10 iterations = 180 iterations"
+    log_info "Total: 9 configurations × 10 iterations = 90 iterations"
 
     # Step 1: Generate test files if they don't exist
     if [ ! -d "$TESTFILES_DIR" ] || [ -z "$(ls -A $TESTFILES_DIR/*.bin 2>/dev/null)" ]; then
@@ -196,170 +170,86 @@ main() {
         source .venv/bin/activate
     fi
 
-    # Detect systemd mode before running configs
-    detect_systemd_mode
-
     # ============================================
-    # Config 1: none, default, no memory limit
+    # Config 1: none
     # ============================================
     run_config 1 "none" "default" "none" \
-        "$OUTPUT_DIR/config-01-none-128mb-no-mem.csv" \
+        "$OUTPUT_DIR/config-01-none-128mb.csv" \
         "$ZSTORE_BIN upload {file} $BUCKET" \
         "$ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
         "$ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
-    # Config 2: none, default, 500MB memory limit
+    # Config 2: fixed, 10MB
     # ============================================
-    run_config 2 "none" "default" "500MB" \
-        "$OUTPUT_DIR/config-02-none-128mb-500mb.csv" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
-
-    # ============================================
-    # Config 3: fixed, 10MB, no limit
-    # ============================================
-    run_config 3 "fixed" "10MB" "none" \
-        "$OUTPUT_DIR/config-03-fixed-10mb-128mb-no-mem.csv" \
+    run_config 2 "fixed" "10MB" "none" \
+        "$OUTPUT_DIR/config-02-fixed-10mb-128mb.csv" \
         "$ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=10MB" \
         "$ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
         "$ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
-    # Config 4: fixed, 10MB, 500MB
+    # Config 3: fixed, 25MB
     # ============================================
-    run_config 4 "fixed" "10MB" "500MB" \
-        "$OUTPUT_DIR/config-04-fixed-10mb-128mb-500mb.csv" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=10MB" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
-
-    # ============================================
-    # Config 5: fixed, 25MB, no limit
-    # ============================================
-    run_config 5 "fixed" "25MB" "none" \
-        "$OUTPUT_DIR/config-05-fixed-25mb-128mb-no-mem.csv" \
+    run_config 3 "fixed" "25MB" "none" \
+        "$OUTPUT_DIR/config-03-fixed-25mb-128mb.csv" \
         "$ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=25MB" \
         "$ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
         "$ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
-    # Config 6: fixed, 25MB, 500MB
+    # Config 4: fixed, 50MB
     # ============================================
-    run_config 6 "fixed" "25MB" "500MB" \
-        "$OUTPUT_DIR/config-06-fixed-25mb-128mb-500mb.csv" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=25MB" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
-
-    # ============================================
-    # Config 7: fixed, 50MB, no limit
-    # ============================================
-    run_config 7 "fixed" "50MB" "none" \
-        "$OUTPUT_DIR/config-07-fixed-50mb-128mb-no-mem.csv" \
+    run_config 4 "fixed" "50MB" "none" \
+        "$OUTPUT_DIR/config-04-fixed-50mb-128mb.csv" \
         "$ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=50MB" \
         "$ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
         "$ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
-    # Config 8: fixed, 50MB, 500MB
+    # Config 5: fixed, 100MB
     # ============================================
-    run_config 8 "fixed" "50MB" "500MB" \
-        "$OUTPUT_DIR/config-08-fixed-50mb-128mb-500mb.csv" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=50MB" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
-
-    # ============================================
-    # Config 9: fixed, 100MB, no limit
-    # ============================================
-    run_config 9 "fixed" "100MB" "none" \
-        "$OUTPUT_DIR/config-09-fixed-100mb-128mb-no-mem.csv" \
+    run_config 5 "fixed" "100MB" "none" \
+        "$OUTPUT_DIR/config-05-fixed-100mb-128mb.csv" \
         "$ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=100MB" \
         "$ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
         "$ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
-    # Config 10: fixed, 100MB, 500MB
+    # Config 6: equal-split, 10MB
     # ============================================
-    run_config 10 "fixed" "100MB" "500MB" \
-        "$OUTPUT_DIR/config-10-fixed-100mb-128mb-500mb.csv" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=fixed --chunk-size=100MB" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
-
-    # ============================================
-    # Config 11: equal-split, 10MB, no limit
-    # ============================================
-    run_config 11 "equal-split" "10MB" "none" \
-        "$OUTPUT_DIR/config-11-equal-split-10mb-128mb-no-mem.csv" \
+    run_config 6 "equal-split" "10MB" "none" \
+        "$OUTPUT_DIR/config-06-equal-split-10mb-128mb.csv" \
         "$ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=10MB" \
         "$ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
         "$ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
-    # Config 12: equal-split, 10MB, 500MB
+    # Config 7: equal-split, 25MB
     # ============================================
-    run_config 12 "equal-split" "10MB" "500MB" \
-        "$OUTPUT_DIR/config-12-equal-split-10mb-128mb-500mb.csv" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=10MB" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
-
-    # ============================================
-    # Config 13: equal-split, 25MB, no limit
-    # ============================================
-    run_config 13 "equal-split" "25MB" "none" \
-        "$OUTPUT_DIR/config-13-equal-split-25mb-128mb-no-mem.csv" \
+    run_config 7 "equal-split" "25MB" "none" \
+        "$OUTPUT_DIR/config-07-equal-split-25mb-128mb.csv" \
         "$ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=25MB" \
         "$ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
         "$ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
-    # Config 14: equal-split, 25MB, 500MB
+    # Config 8: equal-split, 50MB
     # ============================================
-    run_config 14 "equal-split" "25MB" "500MB" \
-        "$OUTPUT_DIR/config-14-equal-split-25mb-128mb-500mb.csv" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=25MB" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
-
-    # ============================================
-    # Config 15: equal-split, 50MB, no limit
-    # ============================================
-    run_config 15 "equal-split" "50MB" "none" \
-        "$OUTPUT_DIR/config-15-equal-split-50mb-128mb-no-mem.csv" \
+    run_config 8 "equal-split" "50MB" "none" \
+        "$OUTPUT_DIR/config-08-equal-split-50mb-128mb.csv" \
         "$ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=50MB" \
         "$ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
         "$ZSTORE_BIN delete $BUCKET{filename}"
 
     # ============================================
-    # Config 16: equal-split, 50MB, 500MB
+    # Config 9: equal-split, 100MB
     # ============================================
-    run_config 16 "equal-split" "50MB" "500MB" \
-        "$OUTPUT_DIR/config-16-equal-split-50mb-128mb-500mb.csv" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=50MB" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
-
-    # ============================================
-    # Config 17: equal-split, 100MB, no limit
-    # ============================================
-    run_config 17 "equal-split" "100MB" "none" \
-        "$OUTPUT_DIR/config-17-equal-split-100mb-128mb-no-mem.csv" \
+    run_config 9 "equal-split" "100MB" "none" \
+        "$OUTPUT_DIR/config-09-equal-split-100mb-128mb.csv" \
         "$ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=100MB" \
         "$ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
         "$ZSTORE_BIN delete $BUCKET{filename}"
-
-    # ============================================
-    # Config 18: equal-split, 100MB, 500MB
-    # ============================================
-    run_config 18 "equal-split" "100MB" "500MB" \
-        "$OUTPUT_DIR/config-18-equal-split-100mb-128mb-500mb.csv" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN upload {file} $BUCKET --chunk-method=equal-split --chunk-size=100MB" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN download $BUCKET{filename} $DOWNLOADS_DIR" \
-        "$MEM_LIMIT_CMD_PREFIX $ZSTORE_BIN delete $BUCKET{filename}"
 
     # Summary
     cd "$START_DIR"
@@ -367,12 +257,7 @@ main() {
     log_info "Benchmark Run Complete"
     log_info "Results directory: $OUTPUT_DIR"
     
-    if [ ${#FAILED_CONFIGS[@]} -eq 0 ]; then
-        log_info "All 18 configurations completed successfully!"
-    else
-        log_warn "Failed configurations: ${FAILED_CONFIGS[*]}"
-        log_warn "Check log files in $OUTPUT_DIR for details"
-    fi
+    log_info "All 9 configurations completed successfully!"
 }
 
 # Run main
