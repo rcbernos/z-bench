@@ -123,10 +123,10 @@ run_config() {
 
         log_info "  Running: $cmd"
 
-        if eval "$cmd" > "$OUTPUT_DIR/config-${config_num}-iter-${iteration}-log.txt" 2>&1; then
+        if eval "$cmd" > "$OUTPUT_DIR/config-${config_num}-iter-${iteration}-${FILE_SIZE}-log.txt" 2>&1; then
             log_info "  Iteration $iteration completed successfully"
         else
-            log_error "  Iteration $iteration failed. See $OUTPUT_DIR/config-${config_num}-iter-${iteration}-log.txt"
+            log_error "  Iteration $iteration failed. See $OUTPUT_DIR/config-${config_num}-iter-${iteration}-${FILE_SIZE}-log.txt"
         fi
     done
 }
