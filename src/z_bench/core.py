@@ -5,6 +5,7 @@ import json
 import random
 import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -254,90 +255,111 @@ class BenchmarkRunner:
         peak_memory = 0.0
 
         try:
-            # Start the subprocess
-            proc = subprocess.Popen(
-                cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
+            # Start the subprocess with stderr redirected to a temp file to prevent pipe
+            # deadlock when child writes more than 64KB of output
+            with tempfile.TemporaryFile(mode="w+b") as err_f:
+                proc = subprocess.Popen(
+                    cmd,
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=err_f,
+                )
 
-            # Get current process for monitoring
-            try:
-                process = psutil.Process(proc.pid)
-            except psutil.NoSuchProcess:
-                process = None
-
-            # Monitor until process completes
-            while proc.poll() is None:
+                # Get current process for monitoring
                 try:
-                    if process:
-                        # Get CPU times before measurement
-                        cpu_before = process.cpu_times()
-                        # Also get children's CPU times
-                        children = process.children(recursive=True)
-                        cpu_before_children = {}
-                        for child in children:
+                    process = psutil.Process(proc.pid)
+                except psutil.NoSuchProcess:
+                    process = None
+
+                # Monitor until process completes
+                while proc.poll() is None:
+                    try:
+                        if process:
+                            # Get CPU times before measurement
+                            cpu_before = process.cpu_times()
+                            # Also get children's CPU times
+                            children = process.children(recursive=True)
+                            cpu_before_children = {}
+                            for child in children:
+                                try:
+                                    cpu_before_children[child.pid] = child.cpu_times()
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    pass
+                            time.sleep(0.01)
+                            # Get CPU times after measurement
                             try:
-                                cpu_before_children[child.pid] = child.cpu_times()
+                                cpu_after = process.cpu_times()
+                                cpu_delta = (cpu_after.user - cpu_before.user) + (
+                                    cpu_after.system - cpu_before.system
+                                )
+                                # Add children's CPU time
+                                for child in children:
+                                    try:
+                                        child_after = child.cpu_times()
+                                        if child.pid in cpu_before_children:
+                                            cpu_before_c = cpu_before_children[
+                                                child.pid
+                                            ]
+                                            cpu_delta += (
+                                                child_after.user - cpu_before_c.user
+                                            ) + (
+                                                child_after.system - cpu_before_c.system
+                                            )
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                        pass
+                                # Convert to percentage (interval is 0.01s = 10ms)
+                                cpu_pct = cpu_delta / 0.01 * 100
+                                peak_cpu = max(peak_cpu, cpu_pct)
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 pass
-                        time.sleep(0.01)
-                        # Get CPU times after measurement
-                        try:
-                            cpu_after = process.cpu_times()
-                            cpu_delta = (cpu_after.user - cpu_before.user) + (
-                                cpu_after.system - cpu_before.system
-                            )
-                            # Add children's CPU time
-                            for child in children:
-                                try:
-                                    child_after = child.cpu_times()
-                                    if child.pid in cpu_before_children:
-                                        cpu_before_c = cpu_before_children[child.pid]
-                                        cpu_delta += (
-                                            child_after.user - cpu_before_c.user
-                                        ) + (child_after.system - cpu_before_c.system)
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-                            # Convert to percentage (interval is 0.01s = 10ms)
-                            cpu_pct = cpu_delta / 0.01 * 100
-                            peak_cpu = max(peak_cpu, cpu_pct)
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
 
-                        # Get memory RSS
-                        try:
-                            mem_info = process.memory_info()
-                            peak_memory = max(
-                                peak_memory, mem_info.rss / (1024 * 1024)
-                            )  # MB
-                            # Add children's memory
-                            for child in children:
-                                try:
-                                    peak_memory = max(
-                                        peak_memory,
-                                        child.memory_info().rss / (1024 * 1024),
-                                    )
-                                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                                    pass
-                        except (psutil.NoSuchProcess, psutil.AccessDenied):
-                            pass
+                            # Get memory RSS
+                            try:
+                                mem_info = process.memory_info()
+                                peak_memory = max(
+                                    peak_memory, mem_info.rss / (1024 * 1024)
+                                )  # MB
+                                # Add children's memory
+                                for child in children:
+                                    try:
+                                        peak_memory = max(
+                                            peak_memory,
+                                            child.memory_info().rss / (1024 * 1024),
+                                        )
+                                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                        pass
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                pass
+                        else:
+                            time.sleep(0.01)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        break
+
+                proc.wait()  # Ensure process has exited before reading stderr
+
+                end_time = time.perf_counter_ns()
+
+                # Read last ~4 KB of stderr for error context
+                if proc.returncode != 0:
+                    err_f.seek(0, 2)  # Seek to end
+                    size = err_f.tell()
+                    if size > 0:
+                        err_f.seek(max(0, size - 4096))  # Read last ~4 KB
+                        stderr_tail = (
+                            err_f.read().decode("utf-8", errors="replace").strip()
+                        )
                     else:
-                        time.sleep(0.01)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    break
-
-            end_time = time.perf_counter_ns()
-
-            # Check final result (includes possible CalledProcessError)
-            _, stderr = proc.communicate()
-            if proc.returncode != 0:
-                error_msg = (
-                    stderr.strip() if stderr else f"Exit code: {proc.returncode}"
-                )
-                return False, error_msg, end_time - start_time, peak_cpu, peak_memory
+                        stderr_tail = ""
+                    error_msg = (
+                        stderr_tail if stderr_tail else f"Exit code: {proc.returncode}"
+                    )
+                    return (
+                        False,
+                        error_msg,
+                        end_time - start_time,
+                        peak_cpu,
+                        peak_memory,
+                    )
 
             return True, "", end_time - start_time, peak_cpu, peak_memory
 
